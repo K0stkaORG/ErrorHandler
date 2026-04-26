@@ -1,0 +1,36 @@
+base location
+49°47.90' N 16°41.20' E, JN89IT
+
+ToA cca 86ms
+frq of TX 200ms
+syncword 0x67
+
+STRUCT:
+
+#pragma pack(push, 1)
+struct RocketTelemetry {
+  uint16_t timestampMs;      // 2 bytes: Rolls over every 65.5s
+  uint8_t  packetId;         // 1 byte:  Rolling counter (0-255)
+  uint8_t  stateFlags;       // 1 byte:  Bit 0: Launch, Bit 1: Apogee, Bit 2: Parachute
+  
+  // BMI270 Raw Data (12 bytes)
+  int16_t  accelX;
+  int16_t  accelY;
+  int16_t  accelZ;
+  int16_t  gyroX;
+  int16_t  gyroY;
+  int16_t  gyroZ;
+  
+  // BMP280 & ADCs (5 bytes)
+  uint16_t pressureScaled;   // 2 bytes: Pressure in Pa / 2
+  uint16_t triboVoltage;     // 2 bytes: Raw ADC value
+  uint8_t  batteryVoltage;   // 1 byte:  Scaled battery voltage
+  
+  // GPS Offsets (6 bytes)
+  int16_t  gpsLatOffset;     // 2 bytes: (Current Lat - Pad Lat) * 10^5
+  int16_t  gpsLonOffset;     // 2 bytes: (Current Lon - Pad Lon) * 10^5
+  int16_t  gpsAltMeters;     // 2 bytes: Altitude in meters
+}; 
+#pragma pack(pop)
+
+static_assert(sizeof(RocketTelemetry) == 27, "Struct size is incorrect!");
