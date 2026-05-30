@@ -27,6 +27,7 @@ constexpr int  LORA_CR = 8; // 4/8
 constexpr int  LORA_SW = 0x67; // syncword
 
 constexpr size_t LORA_MAX_PACKET_SIZE = 255;
+constexpr size_t SERIAL_TX_PACKET_SIZE = 4;
 
 volatile bool packetReceived = false;
 volatile int receivedPacketLength = 0;
@@ -39,6 +40,8 @@ void updateDisplay(String text);
 
 void initializeLoRa();
 void handleIncomingLoRaPackets();
+void handleIncomingSerialPackets();
+void transmitLoRaPacket(const uint8_t *packetBuffer, size_t packetLength);
 void onReceive(int packetSize);
 
 void setup() {
@@ -50,6 +53,8 @@ void setup() {
 }
 
 void loop() {
+  handleIncomingSerialPackets();
+
   if (packetReceived) {
     handleIncomingLoRaPackets();
     packetReceived = false; // Reset RX flag
@@ -114,4 +119,28 @@ void handleIncomingLoRaPackets() {
   Serial.write(packetBuffer, packetLength); // write to serial
   // TODO? display basic data
   updateDisplay("RX " + String(LoRa.packetRssi()) + " dBm " + String(LoRa.packetSnr()) + " dB"); // display signal
+}
+
+void handleIncomingSerialPackets() {
+  static uint8_t packetBuffer[SERIAL_TX_PACKET_SIZE];
+  static size_t packetLength = 0;
+
+  while (Serial.available()) {
+    packetBuffer[packetLength++] = static_cast<uint8_t>(Serial.read());
+
+    if (packetLength == sizeof(packetBuffer)) {
+      transmitLoRaPacket(packetBuffer, packetLength);
+      packetLength = 0;
+    }
+  }
+}
+
+void transmitLoRaPacket(const uint8_t *packetBuffer, size_t packetLength) {
+  LoRa.idle();
+  LoRa.beginPacket();
+  LoRa.write(packetBuffer, packetLength);
+  LoRa.endPacket();
+  LoRa.receive();
+
+  updateDisplay("TX " + String(packetLength) + " bytes");
 }
