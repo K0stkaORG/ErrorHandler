@@ -36,6 +36,7 @@ uint8_t lastPacketId = 0;
 unsigned long lastPacketReceivedMillis = 0;
 bool hasTelemetry = false;
 unsigned long lastDisplayUpdate = 0;
+uint8_t lastBatteryVoltageRaw = 0;
 }
 
 #pragma pack(push, 1)
@@ -90,17 +91,31 @@ void loop() {
     LoRa.receive(); 
   }
 
-  if (hasTelemetry && millis() - lastDisplayUpdate >= 1000) {
+  if (hasTelemetry && millis() - lastDisplayUpdate >= 250) {
     lastDisplayUpdate = millis();
     unsigned long secondsAgo = (millis() - lastPacketReceivedMillis) / 1000;
     
-    display.fillRect(0, 24, SCREEN_WIDTH, 8, SSD1306_BLACK);
+    display.fillRect(0, 24, SCREEN_WIDTH, 16, SSD1306_BLACK);
+    
     display.setCursor(0, 24);
     display.print("ID ");
     display.print(lastPacketId);
     display.print(" ");
     display.print(secondsAgo);
     display.print("s ago");
+
+    float battV = lastBatteryVoltageRaw * 20.0f / 1000.0f;
+    int battPct = (battV - 3.3f) / (4.2f - 3.3f) * 100;
+    if (battPct > 100) battPct = 100;
+    if (battPct < 0) battPct = 0;
+
+    display.setCursor(0, 32);
+    display.print("Rocket ");
+    display.print(battV, 1);
+    display.print("V ");
+    display.print(battPct);
+    display.print("%");
+
     display.display();
   }
 }
@@ -164,6 +179,7 @@ void handleIncomingLoRaPackets() {
   if (packetLength == sizeof(RocketTelemetry)) {
     RocketTelemetry* telemetry = reinterpret_cast<RocketTelemetry*>(packetBuffer);
     lastPacketId = telemetry->packetId;
+    lastBatteryVoltageRaw = telemetry->batteryVoltage;
     lastPacketReceivedMillis = millis();
     hasTelemetry = true;
   }
