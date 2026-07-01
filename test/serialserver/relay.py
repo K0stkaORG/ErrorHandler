@@ -87,6 +87,7 @@ class RelayServer:
                 with self.lock:
                     if self.ser and self.ser.is_open:
                         self.ser.write(data)
+                        self.ser.flush()
                         
             except Exception as e:
                 print(f"TCP read error from {addr}: {e}")
@@ -107,6 +108,11 @@ class RelayServer:
                 if self.ser is None or not self.ser.is_open:
                     print(f"Attempting to connect to serial port {self.serial_port} at {self.baud_rate}...")
                     self.ser = serial.Serial(self.serial_port, self.baud_rate, timeout=1)
+                    # For ESP boards, sometimes toggling DTR/RTS or clearing buffers helps
+                    self.ser.dtr = False
+                    self.ser.rts = False
+                    self.ser.reset_input_buffer()
+                    self.ser.reset_output_buffer()
                     print(f"Successfully connected to {self.serial_port}")
 
                 data = self.ser.read(4096)
