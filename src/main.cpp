@@ -31,7 +31,36 @@ constexpr size_t SERIAL_TX_PACKET_SIZE = 4;
 
 volatile bool packetReceived = false;
 volatile int receivedPacketLength = 0;
+
+uint8_t lastPacketId = 0;
+unsigned long lastPacketReceivedMillis = 0;
+bool hasTelemetry = false;
+unsigned long lastDisplayUpdate = 0;
 }
+
+#pragma pack(push, 1)
+struct RocketTelemetry {
+  uint16_t timestampMs;
+  uint8_t packetId;
+  uint8_t stateFlags;
+
+  int16_t accelX;
+  int16_t accelY;
+  int16_t accelZ;
+  int16_t gyroX;
+  int16_t gyroY;
+  int16_t gyroZ;
+
+  uint16_t pressureScaled;
+  uint16_t triboVoltage;
+  uint8_t batteryVoltage;
+
+  int16_t gpsLatOffset;
+  int16_t gpsLonOffset;
+  int16_t gpsAltMeters;
+  uint16_t ky024Analog;
+};
+#pragma pack(pop)
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
 
@@ -59,6 +88,20 @@ void loop() {
     handleIncomingLoRaPackets();
     packetReceived = false; // Reset RX flag
     LoRa.receive(); 
+  }
+
+  if (hasTelemetry && millis() - lastDisplayUpdate >= 1000) {
+    lastDisplayUpdate = millis();
+    unsigned long secondsAgo = (millis() - lastPacketReceivedMillis) / 1000;
+    
+    display.fillRect(0, 24, SCREEN_WIDTH, 8, SSD1306_BLACK);
+    display.setCursor(0, 24);
+    display.print("ID ");
+    display.print(lastPacketId);
+    display.print(" ");
+    display.print(secondsAgo);
+    display.print("s ago");
+    display.display();
   }
 }
 
@@ -117,6 +160,14 @@ void handleIncomingLoRaPackets() {
   }
 
   Serial.write(packetBuffer, packetLength); // write to serial
+  
+  if (packetLength == sizeof(RocketTelemetry)) {
+    RocketTelemetry* telemetry = reinterpret_cast<RocketTelemetry*>(packetBuffer);
+    lastPacketId = telemetry->packetId;
+    lastPacketReceivedMillis = millis();
+    hasTelemetry = true;
+  }
+
   // TODO? display basic data
   updateDisplay("RX " + String(LoRa.packetRssi()) + " dBm " + String(LoRa.packetSnr()) + " dB"); // display signal
 }
