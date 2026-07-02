@@ -4,6 +4,9 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <LittleFS.h>
+#include <WiFi.h>
+#include <WebServer.h>
 
 #define OLED_SDA 21
 #define OLED_SCL 22
@@ -37,7 +40,118 @@ unsigned long lastPacketReceivedMillis = 0;
 bool hasTelemetry = false;
 unsigned long lastDisplayUpdate = 0;
 uint8_t lastBatteryVoltageRaw = 0;
+
+WebServer server(80);
+QueueHandle_t packetQueue;
+
+struct RawPacket {
+  uint8_t data[LORA_MAX_PACKET_SIZE];
+  size_t length;
+};
+
+const char* HTML_HEAD = R"=====(
+<!DOCTYPE html>
+<html>
+<head>
+<title>Rocket Flight Data</title>
+<style>
+  body { font-family: monospace; background: #222; color: #eee; padding: 20px; }
+  .btn { display: inline-block; padding: 10px 20px; margin: 10px 5px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+  .btn-danger { background: #dc3545; }
+  .data { background: #111; padding: 10px; overflow-x: auto; white-space: pre; }
+</style>
+</head>
+<body>
+<h1>Rocket Flight Data Backup</h1>
+<div>
+  <a href="/download" class="btn">Download flightdata.txt</a>
+  <a href="/flush" class="btn btn-danger" onclick="return confirm('Are you sure?')">Flush Memory</a>
+</div>
+<h2>Hex Dump</h2>
+<div class="data">
+)=====";
+
+const char* HTML_TAIL = R"=====(
+</div>
+</body>
+</html>
+)=====";
+
+void sendHexDump(File& f) {
+  if (!f) return;
+  uint8_t buf[29];
+  char hexBuf[29 * 3 + 2];
+  while (f.available()) {
+    int bytesRead = f.read(buf, 29);
+    int hexIndex = 0;
+    for (int i = 0; i < bytesRead; i++) {
+      sprintf(&hexBuf[hexIndex], "%02X ", buf[i]);
+      hexIndex += 3;
+    }
+    hexBuf[hexIndex++] = '\n';
+    hexBuf[hexIndex] = '\0';
+    server.sendContent(hexBuf);
+  }
 }
+
+void handleRoot() {
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", HTML_HEAD);
+  
+  File fBak = LittleFS.open("/flight.bak", FILE_READ);
+  sendHexDump(fBak);
+  if (fBak) fBak.close();
+
+  File fBin = LittleFS.open("/flight.bin", FILE_READ);
+  sendHexDump(fBin);
+  if (fBin) fBin.close();
+
+  server.sendContent(HTML_TAIL);
+  server.sendContent(""); 
+}
+
+void handleDownload() {
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.sendHeader("Content-Disposition", "attachment; filename=flightdata.txt");
+  server.send(200, "text/plain", "");
+
+  File fBak = LittleFS.open("/flight.bak", FILE_READ);
+  sendHexDump(fBak);
+  if (fBak) fBak.close();
+
+  File fBin = LittleFS.open("/flight.bin", FILE_READ);
+  sendHexDump(fBin);
+  if (fBin) fBin.close();
+
+  server.sendContent("");
+}
+
+void handleFlush() {
+  LittleFS.remove("/flight.bak");
+  LittleFS.remove("/flight.bin");
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+void flashWriterTask(void *pvParameters) {
+  while (true) {
+    RawPacket pkt;
+    if (xQueueReceive(packetQueue, &pkt, portMAX_DELAY) == pdTRUE) {
+      File f = LittleFS.open("/flight.bin", FILE_APPEND);
+      if (f) {
+        f.write(pkt.data, pkt.length);
+        size_t size = f.size();
+        f.close();
+        if (size > 500000) { 
+          LittleFS.remove("/flight.bak");
+          LittleFS.rename("/flight.bin", "/flight.bak");
+        }
+      }
+    }
+  }
+}
+}
+
 
 #pragma pack(push, 1)
 struct RocketTelemetry {
@@ -80,9 +194,27 @@ void setup() {
 
   initializeDisplay();
   initializeLoRa();
+
+  if (!LittleFS.begin(true)) {
+    updateDisplay("FS Mount FAIL");
+  }
+
+  packetQueue = xQueueCreate(100, sizeof(RawPacket));
+  xTaskCreatePinnedToCore(flashWriterTask, "FlashWriter", 4096, NULL, 1, NULL, 0);
+
+  IPAddress IP(172, 27, 67, 1);
+  IPAddress NMask(255, 255, 255, 240);
+  WiFi.softAPConfig(IP, IP, NMask);
+  WiFi.softAP("TestingInProduction", "hlinena67");
+
+  server.on("/", handleRoot);
+  server.on("/download", handleDownload);
+  server.on("/flush", handleFlush);
+  server.begin();
 }
 
 void loop() {
+  server.handleClient();
   handleIncomingSerialPackets();
 
   if (packetReceived) {
@@ -175,6 +307,13 @@ void handleIncomingLoRaPackets() {
   }
 
   Serial.write(packetBuffer, packetLength); // write to serial
+
+  // Enqueue for backup storage
+  RawPacket pkt;
+  pkt.length = packetLength;
+  memcpy(pkt.data, packetBuffer, packetLength);
+  // Do not block, drop if full (Option A)
+  xQueueSend(packetQueue, &pkt, 0);
   
   if (packetLength == sizeof(RocketTelemetry)) {
     RocketTelemetry* telemetry = reinterpret_cast<RocketTelemetry*>(packetBuffer);
