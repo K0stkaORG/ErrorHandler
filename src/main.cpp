@@ -227,7 +227,7 @@ void initializeLoRa();
 void handleIncomingLoRaPackets();
 void handleIncomingSerialPackets();
 void transmitLoRaPacket(const uint8_t *packetBuffer, size_t packetLength);
-void onReceive(int packetSize);
+void IRAM_ATTR onReceiveInterrupt();
 
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
@@ -259,8 +259,10 @@ void loop() {
   handleIncomingSerialPackets();
 
   if (packetReceived) {
-    handleIncomingLoRaPackets();
     packetReceived = false; // Reset RX flag
+    if (LoRa.parsePacket() > 0) {
+      handleIncomingLoRaPackets();
+    }
     LoRa.receive(); 
   }
 
@@ -326,17 +328,14 @@ void initializeLoRa() {
   LoRa.setCodingRate4(LORA_CR);
   LoRa.setSyncWord(LORA_SW); 
   LoRa.setTxPower(LORA_TX_POWER);
-  LoRa.onReceive(onReceive);
+  pinMode(LORA_IRQ, INPUT);
+  attachInterrupt(digitalPinToInterrupt(LORA_IRQ), onReceiveInterrupt, RISING);
   LoRa.receive();
 
   updateDisplay("LoRa OK");
 }
 
-// DIO0 -> High
-void onReceive(int packetSize) {
-  if (packetSize <= 0) return;
-  
-  receivedPacketLength = packetSize;
+void IRAM_ATTR onReceiveInterrupt() {
   packetReceived = true;
 }
 
