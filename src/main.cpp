@@ -28,6 +28,7 @@ constexpr long LORA_BANDWIDTH = 250000; // 250 kHz
 constexpr int  LORA_SF = 8;
 constexpr int  LORA_CR = 8; // 4/8
 constexpr int  LORA_SW = 0x67; // syncword
+constexpr int  LORA_TX_POWER = 20; // 20 dBm TX power
 
 constexpr size_t LORA_MAX_PACKET_SIZE = 255;
 constexpr size_t SERIAL_TX_PACKET_SIZE = 4;
@@ -324,6 +325,7 @@ void initializeLoRa() {
   LoRa.setSpreadingFactor(LORA_SF);
   LoRa.setCodingRate4(LORA_CR);
   LoRa.setSyncWord(LORA_SW); 
+  LoRa.setTxPower(LORA_TX_POWER);
   LoRa.onReceive(onReceive);
   LoRa.receive();
 
