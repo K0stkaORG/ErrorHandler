@@ -79,10 +79,10 @@ const char* HTML_TAIL = R"=====(
 
 void sendHexDump(File& f) {
   if (!f) return;
-  uint8_t buf[29];
-  char hexBuf[29 * 3 + 2];
+  uint8_t buf[33];
+  char hexBuf[33 * 3 + 2];
   while (f.available()) {
-    int bytesRead = f.read(buf, 29);
+    int bytesRead = f.read(buf, 33);
     int hexIndex = 0;
     for (int i = 0; i < bytesRead; i++) {
       sprintf(&hexBuf[hexIndex], "%02X ", buf[i]);
@@ -193,6 +193,7 @@ void flashWriterTask(void *pvParameters) {
 
 #pragma pack(push, 1)
 struct RocketTelemetry {
+  uint16_t syncWord;
   uint16_t timestampMs;
   uint8_t packetId;
   uint8_t stateFlags;
@@ -204,13 +205,14 @@ struct RocketTelemetry {
   int16_t gyroY;
   int16_t gyroZ;
 
-  uint16_t pressureScaled;
+  int16_t kfAltitudeAgl;
+  uint16_t rawPressure;
   uint16_t triboVoltage;
   uint8_t batteryVoltage;
 
   int16_t gpsLatOffset;
   int16_t gpsLonOffset;
-  int16_t gpsAltMeters;
+  int16_t kfVerticalVelocity;
   uint16_t ky024Analog;
 };
 #pragma pack(pop)
