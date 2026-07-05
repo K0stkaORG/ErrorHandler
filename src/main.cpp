@@ -134,12 +134,48 @@ void handleFlush() {
 }
 
 void flashWriterTask(void *pvParameters) {
+  const size_t BUFFER_LIMIT = 8192; // 8KB buffer to hold ~5.6 seconds of data at 50Hz
+  uint8_t *writeBuffer = (uint8_t *)malloc(BUFFER_LIMIT);
+  if (!writeBuffer) {
+    // If malloc fails (very unlikely), delete task
+    vTaskDelete(NULL);
+    return;
+  }
+  size_t bufferOffset = 0;
+  unsigned long lastWriteMillis = millis();
+
   while (true) {
     RawPacket pkt;
-    if (xQueueReceive(packetQueue, &pkt, portMAX_DELAY) == pdTRUE) {
+    // Wake up periodically to check queue (timeout of 100ms)
+    if (xQueueReceive(packetQueue, &pkt, pdMS_TO_TICKS(100)) == pdTRUE) {
+      if (bufferOffset + pkt.length <= BUFFER_LIMIT) {
+        memcpy(writeBuffer + bufferOffset, pkt.data, pkt.length);
+        bufferOffset += pkt.length;
+      } else {
+        // Buffer is full, force write to flash immediately
+        File f = LittleFS.open("/flight.bin", FILE_APPEND);
+        if (f) {
+          f.write(writeBuffer, bufferOffset);
+          size_t size = f.size();
+          f.close();
+          if (size > 500000) { 
+            LittleFS.remove("/flight.bak");
+            LittleFS.rename("/flight.bin", "/flight.bak");
+          }
+        }
+        
+        // Copy the current packet into the start of the cleared buffer
+        memcpy(writeBuffer, pkt.data, pkt.length);
+        bufferOffset = pkt.length;
+        lastWriteMillis = millis();
+      }
+    }
+
+    // Write to flash every 5 seconds if there is data
+    if (bufferOffset > 0 && (millis() - lastWriteMillis >= 5000)) {
       File f = LittleFS.open("/flight.bin", FILE_APPEND);
       if (f) {
-        f.write(pkt.data, pkt.length);
+        f.write(writeBuffer, bufferOffset);
         size_t size = f.size();
         f.close();
         if (size > 500000) { 
@@ -147,6 +183,8 @@ void flashWriterTask(void *pvParameters) {
           LittleFS.rename("/flight.bin", "/flight.bak");
         }
       }
+      bufferOffset = 0;
+      lastWriteMillis = millis();
     }
   }
 }
